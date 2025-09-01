@@ -1,7 +1,5 @@
 <?php
 
-// app/Http/Controllers/CartController.php
-
 namespace App\Http\Controllers;
 
 use App\Services\MedusaApiService;
@@ -30,6 +28,7 @@ class CartController extends Controller
                 $cart = $cartResponse['cart'];
             } catch (\Exception $e) {
                 // Cart not found or expired
+                Log::warning("Cart not found: " . $e->getMessage());
                 Session::forget('cart_id');
             }
         }
@@ -44,24 +43,31 @@ class CartController extends Controller
             'variant_id' => 'required|string',
             'quantity' => 'required|integer|min:1',
         ]);
-        logger('here');
-        $cartId = Session::get('cart_id');
-        logger($cartId);
-        if (!$cartId) {
-            $regionId = config('services.medusa.region_id');
-            $cartData = $this->medusaService->createCart([
-                'region_id' => $regionId,
-                'currency_code' => 'eur',
-            ]);
 
-            $cartId = $cartData['cart']['id'];
-            Session::put('cart_id', $cartId);
+        $cartId = Session::get('cart_id');
+
+        // Create a new cart if one doesn't exist
+        if (!$cartId) {
+            try {
+                $regionId = config('services.medusa.region_id');
+                $cartData = $this->medusaService->createCart([
+                    'region_id' => $regionId,
+                    'currency_code' => 'eur',
+                ]);
+
+                $cartId = $cartData['cart']['id'];
+                Session::put('cart_id', $cartId);
+            } catch (\Exception $e) {
+                Log::error("Failed to create cart: " . $e->getMessage());
+                return redirect()->back()->with('error', 'Failed to create cart.');
+            }
         }
 
         try {
+            // Add item to cart
             $this->medusaService->addToCart($cartId, $request->variant_id, $request->quantity);
 
-            // ✅ Now fetch the updated cart to get item count
+            // Update cart count in session
             $cart = $this->medusaService->getCart($cartId);
             $itemCount = collect($cart['cart']['items'])->sum('quantity');
             Session::put('cart_count', $itemCount);
@@ -88,8 +94,15 @@ class CartController extends Controller
 
         try {
             $this->medusaService->updateLineItem($cartId, $lineItemId, $request->quantity);
+            
+            // Update cart count in session
+            $cart = $this->medusaService->getCart($cartId);
+            $itemCount = collect($cart['cart']['items'])->sum('quantity');
+            Session::put('cart_count', $itemCount);
+            
             return redirect()->route('cart.index')->with('success', 'Cart updated.');
         } catch (\Exception $e) {
+            Log::error("Failed to update cart item: " . $e->getMessage());
             return redirect()->route('cart.index')->with('error', 'Failed to update item.');
         }
     }
@@ -105,8 +118,15 @@ class CartController extends Controller
 
         try {
             $this->medusaService->removeLineItem($cartId, $lineItemId);
+            
+            // Update cart count in session
+            $cart = $this->medusaService->getCart($cartId);
+            $itemCount = collect($cart['cart']['items'])->sum('quantity');
+            Session::put('cart_count', $itemCount);
+            
             return redirect()->route('cart.index')->with('success', 'Item removed from cart.');
         } catch (\Exception $e) {
+            Log::error("Failed to remove cart item: " . $e->getMessage());
             return redirect()->route('cart.index')->with('error', 'Failed to remove item.');
         }
     }

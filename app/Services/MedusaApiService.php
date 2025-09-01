@@ -29,12 +29,6 @@ class MedusaApiService
             $data = null; // No body for GET
         }
 
-        // Log::debug('Medusa API Request', [
-        //     'method' => $method,
-        //     'url' => $url,
-        //     'data' => $data,
-        // ]);
-
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -57,12 +51,6 @@ class MedusaApiService
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
         curl_close($ch);
-
-        // Log::debug('Medusa API Response', [
-        //     'status' => $httpCode,
-        //     'response' => $response,
-        //     'error' => $error,
-        // ]);
 
         if ($error) {
             throw new \Exception("cURL Error: $error");
@@ -142,28 +130,6 @@ class MedusaApiService
         ]);
     }
 
-    // public function createPaymentSessions(string $cartId)
-    // {
-    //     return $this->request('POST', "carts/{$cartId}/payment-sessions");
-    // }
-
-    // public function selectPaymentSession(string $cartId, string $providerId)
-    // {
-    //     return $this->request('POST', "carts/{$cartId}/payment-session", [
-    //         'provider_id' => $providerId,
-    //     ]);
-    // }
-
-    // public function initiatePaymentSession(string $cartId, string $providerId)
-    // {
-    //     return $this->request('POST', "carts/{$cartId}/payment-sessions/{$providerId}/initiate");
-    // }
-
-    // public function completeCart(string $cartId)
-    // {
-    //     return $this->request('POST', "carts/{$cartId}/complete");
-    // }
-
     public function getShippingOptions(string $cartId)
     {
         $query = http_build_query(['cart_id' => $cartId]);
@@ -188,42 +154,6 @@ class MedusaApiService
         return $response['payment_collection'];
     }
 
-    public function createPaymentSessions(string $cartId)
-    {
-        $collection = $this->ensurePaymentCollection($cartId);
-        $collectionId = $collection['id'];
-
-        return $this->request('POST', "payment-collections/{$collectionId}/payment-sessions", []);
-        // ✅ Empty body — creates sessions for ALL enabled providers
-    }
-
-    public function selectPaymentSession(string $cartId, string $providerId)
-    {
-        $collection = $this->ensurePaymentCollection($cartId);
-        $collectionId = $collection['id'];
-
-        return $this->request('POST', "payment-collections/{$collectionId}/payment-session", [
-            'provider_id' => $providerId, // ✅ Required to select
-        ]);
-    }
-
-    // public function initiatePaymentSession(string $cartId, string $providerId)
-    // {
-    //     $collection = $this->ensurePaymentCollection($cartId);
-    //     $collectionId = $collection['id'];
-
-    //     return $this->request('POST', "payment-collections/{$collectionId}/payment-sessions/{$providerId}/initiate");
-    // }
-    public function initiatePaymentSession(string $cartId, string $providerId)
-    {
-        $collection = $this->ensurePaymentCollection($cartId);
-        $collectionId = $collection['id'];
-
-        return $this->request('POST', "payment-collections/{$collectionId}/payment-sessions/initiate", [
-            'provider_id' => $providerId,
-        ]);
-    }
-
     public function completeCart(string $cartId)
     {
         return $this->request('POST', "carts/{$cartId}/complete", []);
@@ -236,13 +166,6 @@ class MedusaApiService
         ]);
     }
 
-    // public function refreshPaymentCollection(string $cartId)
-    // {
-    //     return $this->request('POST', 'payment-collections/refresh', [
-    //         'cart_id' => $cartId,
-    //     ]);
-    // }
-
     public function getPaymentProvidersByRegion(string $regionId)
     {
         return $this->request('GET', 'payment-providers', [
@@ -252,20 +175,35 @@ class MedusaApiService
 
     public function createPaymentSessionsForProvider(string $cartId, string $providerId)
     {
+        // First ensure payment collection exists
         $collection = $this->ensurePaymentCollection($cartId);
         $collectionId = $collection['id'];
 
+        // Before creating new sessions, try to refresh the payment collection to clean up any stale sessions
+        try {
+            $this->refreshPaymentCollection($cartId);
+        } catch (\Exception $e) {
+            // If refresh fails, continue anyway
+            \Illuminate\Support\Facades\Log::warning('Failed to refresh payment collection: ' . $e->getMessage());
+        }
+
+        // Create payment session for the specific provider with proper data
         return $this->request('POST', "payment-collections/{$collectionId}/payment-sessions", [
-            'provider_id' => $providerId, // ✅ Only create for selected provider
+            'provider_id' => $providerId,
+            'data' => [
+                'setup_future_usage' => 'off_session',
+            ],
         ]);
     }
 
     public function getPaymentSessionForProvider(string $cartId, string $providerId)
     {
-        $collection = $this->ensurePaymentCollection($cartId);
-        $collectionId = $collection['id'];
-
         $cart = $this->getCart($cartId);
+        
+        if (empty($cart['cart']['payment_collection']['payment_sessions'])) {
+            return null;
+        }
+        
         $paymentSession = collect($cart['cart']['payment_collection']['payment_sessions'])
             ->firstWhere('provider_id', $providerId);
 
@@ -274,8 +212,17 @@ class MedusaApiService
 
     public function refreshPaymentCollection(string $cartId)
     {
-        return $this->request('POST', 'payment-collections/refresh', [
-            'cart_id' => $cartId,
-        ]);
+        try {
+            // First ensure payment collection exists
+            $collection = $this->ensurePaymentCollection($cartId);
+            $collectionId = $collection['id'];
+
+            // Refresh the payment collection
+            return $this->request('POST', "payment-collections/{$collectionId}/refresh", []);
+        } catch (\Exception $e) {
+            // Log the error but don't throw it
+            \Illuminate\Support\Facades\Log::warning('Failed to refresh payment collection: ' . $e->getMessage());
+            return null;
+        }
     }
 }

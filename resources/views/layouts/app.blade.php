@@ -7,9 +7,7 @@
     <title>Medusa Laravel Store</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <script src="https://js.stripe.com/v3/"></script>
-    {{-- <meta name="csrf-token" content="{{ csrf_token() }}"> --}}
     <meta name="csrf-token" content="{{ csrf_token() }}">
-
 
     @stack('styles')
 </head>
@@ -36,7 +34,7 @@
                         }
                     @endphp
                     @if (session('cart_count'))
-                        <span class="bg-red-500 ...">{{ session('cart_count') }}</span>
+                        <span class="bg-red-500 text-white rounded-full px-2 py-1 text-xs">{{ session('cart_count') }}</span>
                     @endif
                 </a>
                 <a href="#" class="text-gray-600 hover:text-gray-800">Account</a>
